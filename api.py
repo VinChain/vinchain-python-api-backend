@@ -1,8 +1,7 @@
 import datetime
 import json
-import math
-import os
 import urllib2
+import ssl
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS, cross_origin
@@ -41,22 +40,14 @@ def header():
     confidental_supply = j2["result"][0]["confidential_supply"]
 
     market_cap = int(current_supply) + int(confidental_supply)
-    j["result"]["bts_market_cap"] = int(market_cap/100000000)
+    j["result"]["bts_market_cap"] = int(market_cap/1000000)
     #print j["result"][0]["bts_market_cap"]
 
-    ws.send('{"id":1, "method":"call", "params":[0,"get_24_volume",["BTS", "OPEN.BTC"]]}')
-    result3 = ws.recv()
-    j3 = json.loads(result3)    
-    if config.TESTNET != 1: # Todo: had to do something else for the testnet
-        ws.send('{"id":1, "method":"call", "params":[0,"get_24_volume",["BTS", "OPEN.BTC"]]}')
-        result3 = ws.recv()
-        j3 = json.loads(result3)
-
-        j["result"]["quote_volume"] = j3["result"]["quote_volume"]
-    else:
-        j["result"]["quote_volume"] = 0
-
-    j["result"]["quote_volume"] = j3["result"]["quote_volume"]
+    # to avoid error 'URLError: <urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed'
+    gcontext = ssl.SSLContext(ssl.PROTOCOL_TLSv1)
+    contents = urllib2.urlopen(config.COINMARKETCAP_API + "/ticker/" + str(config.VIN_CURRENCY_ID), context=gcontext).read()
+    res = json.loads(contents)
+    j["result"]["quote_volume"] = round(res['data']['quotes']['USD']['volume_24h'])
 
     ws.send('{"id":1, "method":"call", "params":[0,"get_global_properties",[]]}')
     result5 = ws.recv()
@@ -141,7 +132,8 @@ def get_operation():
     result3 = ws.recv()
     j3 = json.loads(result3)
     #print j3["result"]["quote_volume"]
-    j["result"][0]["quote_volume"] = j3["result"]["quote_volume"]
+    # j["result"][0]["quote_volume"] = j3["result"]["quote_volume"]
+    j["result"][0]["quote_volume"] = 0
 
     # TODO: making this call with every operation is not very efficient as this are static properties
     ws.send('{"id":1, "method":"call", "params":[0,"get_global_properties",[]]}')
@@ -241,12 +233,13 @@ def operation_full_elastic():
 
     market_cap = int(current_supply) + int(confidental_supply)
     bts_market_cap = int(market_cap/100000000)
-    
+
+    quote_volume = 0
     if config.TESTNET != 1: # Todo: had to do something else for the testnet
         ws.send('{"id":1, "method":"call", "params":[0,"get_24_volume",["BTS", "OPEN.BTC"]]}')
         result3 = ws.recv()
         j3 = json.loads(result3)
-        quote_volume = j3["result"]["quote_volume"]
+        # quote_volume = j3["result"]["quote_volume"]
     else:
         quote_volume = 0
 
@@ -534,7 +527,11 @@ def lastnetworkops():
     for o in range(0, len(results)):
         operation_id = results[o][2]
         object = _get_object(operation_id)
-        results[o] = results[o] + tuple(object[0]["op"])
+        if object[0] is not None:
+            print('!! OK operation={} object={}'.format(results[o], object))
+            results[o] = results[o] + tuple(object[0]["op"])
+        else:
+            print('!! Wrong operation={}'.format(results[o]))
 
     return jsonify(results)
 
@@ -683,16 +680,26 @@ def get_markets():
     return jsonify(results)
 
 
+def get_markets_data():
+    pairs_data = {}
+    # to avoid error 'URLError: <urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed'
+    gcontext = ssl.SSLContext(ssl.PROTOCOL_TLSv1)
+    contents = urllib2.urlopen(config.IDAX_API + '/tickers', context=gcontext).read()
+    res = json.loads(contents)
+
+    pair_prefix = '{}_'.format(config.CORE_ASSET_SYMBOL)  # 'VIN_'
+    for pair in res['data']:
+        if pair['market'].startswith(pair_prefix):
+            pairs_data[pair['market']] = {'pair': pair['market'],
+                                'price': pair['lastPrice'],
+                                'volume': pair['volume']}
+    return pairs_data
+
+
 @app.route('/get_most_active_markets')
 def get_most_active_markets():
-    con = psycopg2.connect(**config.POSTGRES)
-    cur = con.cursor()
-
-    query = "SELECT * FROM markets WHERE volume>0 ORDER BY volume DESC LIMIT 100"
-    cur.execute(query)
-    results = cur.fetchall()
-    con.close()
-    return jsonify(results)
+    pairs_data = get_markets_data()
+    return jsonify(pairs_data)
 
 
 @app.route('/get_order_book')
@@ -1122,31 +1129,8 @@ def committee_votes():
 
 @app.route('/top_markets')
 def top_markets():
-    con = psycopg2.connect(**config.POSTGRES)
-    cur = con.cursor()
-
-    query = "SELECT volume FROM markets ORDER BY volume DESC LIMIT 7"
-    cur.execute(query)
-    results = cur.fetchall()
-    total = 0
-    for v in range(0, len(results)):
-        total = total + results[v][0]
-
-    query = "SELECT pair, volume FROM markets ORDER BY volume DESC LIMIT 7"
-    cur.execute(query)
-    results = cur.fetchall()
-
-    w = 2
-    h = len(results)
-    top_markets = [[0 for x in range(w)] for y in range(h)]
-
-    for tp in range(0, h):
-        #print results[tp][1]
-        top_markets[tp][0] = results[tp][0]
-        #perc = (results[tp][1]*100)/total
-        top_markets[tp][1] = results[tp][1]
-
-    con.close()
+    markets_data = get_markets_data()
+    top_markets = [[val['pair'], val['volume']] for val in markets_data.itervalues()]
     return jsonify(top_markets)
 
 
@@ -1433,6 +1417,10 @@ def get_fill_order_history():
 
 @app.route('/get_dex_total_volume')
 def get_dex_total_volume():
+    res = {"volume_bts": 0, "volume_usd": 0, "volume_cny": 0,
+           "market_cap_bts": 0, "market_cap_usd": 0, "market_cap_cny": 0}
+    return jsonify(res)
+
     con = psycopg2.connect(**config.POSTGRES)
     cur = con.cursor()
 
@@ -1458,8 +1446,7 @@ def get_dex_total_volume():
     con.close()
 
     res = {"volume_bts": round(volume), "volume_usd": round(volume/usd_price), "volume_cny": round(volume/cny_price),
-           "market_cap_bts": round(market_cap), "market_cap_usd": round(market_cap/usd_price), "market_cap_cny": round(market_cap/cny_price)}
-
+          "market_cap_bts": round(market_cap), "market_cap_usd": round(market_cap/usd_price), "market_cap_cny": round(market_cap/cny_price)}
     return jsonify(res)
 
 
