@@ -21,6 +21,9 @@ app.config['SWAGGER'] = {
 Swagger(app, template_file='api.yaml')
 
 ws = create_connection(config.WEBSOCKET_URL)
+ws2 = create_connection(config.WEBSOCKET_URL)
+ws3 = create_connection(config.WEBSOCKET_URL)
+ws4 = create_connection(config.WEBSOCKET_URL)
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=5000)
@@ -81,8 +84,8 @@ def account_name():
     return jsonify(_account_name(account_id))
 
 def _account_name(account_id):
-    ws.send('{"id":1, "method":"call", "params":[0,"get_accounts",[["'+account_id+'"]]]}')
-    result =  ws.recv()
+    ws4.send('{"id":1, "method":"call", "params":[0,"get_accounts",[["'+account_id+'"]]]}')
+    result =  ws4.recv()
     j = json.loads(result)
     return j["result"][0]["name"]
 
@@ -373,20 +376,20 @@ def get_asset():
 
 def _get_asset(asset_id):
     if not isObject(asset_id):
-        ws.send('{"id":1, "method":"call", "params":[0,"lookup_asset_symbols",[["' + asset_id + '"], 0]]}')
-        result_l = ws.recv()
+        ws3.send('{"id":1, "method":"call", "params":[0,"lookup_asset_symbols",[["' + asset_id + '"], 0]]}')
+        result_l = ws3.recv()
         j_l = json.loads(result_l)
         asset_id = j_l["result"][0]["id"]
 
     #print asset_id
-    ws.send('{"id":1, "method":"call", "params":[0,"get_assets",[["' + asset_id + '"], 0]]}')
-    result = ws.recv()
+    ws3.send('{"id":1, "method":"call", "params":[0,"get_assets",[["' + asset_id + '"], 0]]}')
+    result = ws3.recv()
     j = json.loads(result)
 
     dynamic_asset_data_id =  j["result"][0]["dynamic_asset_data_id"]
 
-    ws.send('{"id": 1, "method": "call", "params": [0, "get_objects", [["'+dynamic_asset_data_id+'"]]]}')
-    result2 = ws.recv()
+    ws3.send('{"id": 1, "method": "call", "params": [0, "get_objects", [["'+dynamic_asset_data_id+'"]]]}')
+    result2 = ws3.recv()
     j2 = json.loads(result2)
     #print j2["result"][0]["current_supply"]
 
@@ -398,8 +401,8 @@ def _get_asset(asset_id):
     j["result"][0]["fee_pool"] = j2["result"][0]["fee_pool"]
 
     issuer = j["result"][0]["issuer"]
-    ws.send('{"id": 1, "method": "call", "params": [0, "get_objects", [["'+issuer+'"]]]}')
-    result3 = ws.recv()
+    ws3.send('{"id": 1, "method": "call", "params": [0, "get_objects", [["'+issuer+'"]]]}')
+    result3 = ws3.recv()
     j3 = json.loads(result3)
     j["result"][0]["issuer_name"] = j3["result"][0]["name"]
 
@@ -616,7 +619,7 @@ def get_workers():
     count =  ws.recv()
     count_j = json.loads(count)
 
-    workers_count = int(count_j["result"])
+    workers_count = count_j["result"]
 
     #print workers_count
 
@@ -730,22 +733,22 @@ def get_open_orders():
 
 @app.route('/get_witnesses')
 def get_witnesses():
-    ws.send('{"jsonrpc": "2.0", "method": "get_witness_count", "params": [], "id": 1}')
-    count =  ws.recv()
+    ws2.send('{"jsonrpc": "2.0", "method": "get_witness_count", "params": [], "id": 1}')
+    count =  ws2.recv()
     count_j = json.loads(count)
-    witnesses_count = int(count_j["result"])
+
+    witnesses_count = count_j["result"]
 
     witnesses = []
     for w in range(0, witnesses_count):
-        ws.send('{"id":1, "method":"call", "params":[0,"get_objects",[["1.6.'+str(w)+'"]]]}')
-        result =  ws.recv()
-
+        ws2.send('{"id":1, "method":"call", "params":[0,"get_objects",[["1.6.'+str(w)+'"]]]}')
+        result =  ws2.recv()
         j = json.loads(result)
-        if j["result"][0]:
+        if j["result"] and j["result"][0] is not None:
             account_id = j["result"][0]["witness_account"]
             #print account_id
-            ws.send('{"id":1, "method":"call", "params":[0,"get_accounts",[["' + account_id + '"]]]}')
-            result2 = ws.recv()
+            ws2.send('{"id":1, "method":"call", "params":[0,"get_accounts",[["' + account_id + '"]]]}')
+            result2 = ws2.recv()
             j2 = json.loads(result2)
 
             account_name = j2["result"][0]["name"]
