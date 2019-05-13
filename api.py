@@ -2,6 +2,7 @@ import datetime
 import json
 import urllib2
 import ssl
+import functools
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS, cross_origin
@@ -20,17 +21,33 @@ app.config['SWAGGER'] = {
 }
 Swagger(app, template_file='api.yaml')
 
-ws = create_connection(config.WEBSOCKET_URL)
-ws2 = create_connection(config.WEBSOCKET_URL)
-ws3 = create_connection(config.WEBSOCKET_URL)
-ws4 = create_connection(config.WEBSOCKET_URL)
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=5000)
 
 
+
+
+def use_ws_connection(url=config.WEBSOCKET_URL):
+    def decorator_use_ws_connection(func):
+      @functools.wraps(func)
+      def wrapper(*args, **kwargs):
+        ws = create_connection(url)
+        try:
+            result = func(ws, *args, **kwargs)
+        finally:
+            ws.close()
+        return result
+
+      return wrapper
+
+    return decorator_use_ws_connection
+
+
+
 @app.route('/header')
-def header():
+@use_ws_connection()
+def header(ws):
     ws.send('{"id":1, "method":"call", "params":[0,"get_dynamic_global_properties",[]]}')
     result =  ws.recv()
     j = json.loads(result)
@@ -72,7 +89,8 @@ def account():
     return jsonify(_account(account_id))
 
 
-def _account(account_id):
+@use_ws_connection()
+def _account(ws, account_id):
     ws.send('{"id":1, "method":"call", "params":[0,"get_accounts",[["'+account_id+'"]]]}')
     result =  ws.recv()
     j = json.loads(result)
@@ -83,18 +101,23 @@ def account_name():
     account_id = request.args.get('account_id')
     return jsonify(_account_name(account_id))
 
-def _account_name(account_id):
-    ws4.send('{"id":1, "method":"call", "params":[0,"get_accounts",[["'+account_id+'"]]]}')
-    result =  ws4.recv()
+
+@use_ws_connection()
+def _account_name(ws, account_id):
+    ws.send('{"id":1, "method":"call", "params":[0,"get_accounts",[["'+account_id+'"]]]}')
+    result =  ws.recv()
     j = json.loads(result)
     return j["result"][0]["name"]
+
 
 @app.route('/account_id')
 def account_id():
     account_name = request.args.get('account_name')
     return jsonify(_account_id(account_name))
 
-def _account_id(account_name):
+
+@use_ws_connection()
+def _account_id(ws, account_name):
     ws.send('{"id":1, "method":"call", "params":[0,"lookup_account_names",[["' + account_name + '"], 0]]}')
     result = ws.recv()
     j = json.loads(result)
@@ -103,7 +126,8 @@ def _account_id(account_name):
 
 
 @app.route('/operation')
-def get_operation():
+@use_ws_connection()
+def get_operation(ws):
     operation_id = request.args.get('operation_id')
     ws.send('{"id":1, "method":"call", "params":[0,"get_objects",[["'+operation_id+'"]]]}')
     result =  ws.recv()
@@ -156,10 +180,9 @@ def get_operation():
 
 
 @app.route('/operation_full')
-def operation_full():
+@use_ws_connection(config.FULL_WEBSOCKET_URL)
+def operation_full(ws):
     # lets connect the operations to a full node
-    #full_websocket_url = "ws://node.testnet.bitshares.eu:18092/ws"
-    ws = create_connection(config.FULL_WEBSOCKET_URL)
 
     operation_id = request.args.get('operation_id')
     ws.send('{"id":1, "method":"call", "params":[0,"get_objects",[["'+operation_id+'"]]]}')
@@ -212,7 +235,8 @@ def operation_full():
 
 
 @app.route('/operation_full_elastic')
-def operation_full_elastic():
+@use_ws_connection()
+def operation_full_elastic(ws):
 
     operation_id = request.args.get('operation_id')
     contents = urllib2.urlopen(config.ES_WRAPPER + "/get_single_operation?operation_id=" + operation_id).read()
@@ -271,7 +295,8 @@ def operation_full_elastic():
 
 
 @app.route('/accounts')
-def accounts():
+@use_ws_connection()
+def accounts(ws):
     ws.send('{"id":2,"method":"call","params":[1,"login",["",""]]}')
     login =  ws.recv()
     #print  result2
@@ -293,7 +318,8 @@ def accounts():
 
 
 @app.route('/full_account')
-def full_account():
+@use_ws_connection()
+def full_account(ws):
     account_id = request.args.get('account_id')
 
     ws.send('{"id":1, "method":"call", "params":[0,"get_full_accounts",[["'+account_id+'"], 0]]}')
@@ -319,7 +345,8 @@ def assets():
 
 
 @app.route('/fees')
-def fees():
+@use_ws_connection()
+def fees(ws):
     ws.send('{"id":1, "method":"call", "params":[0,"get_global_properties",[]]}')
     result =  ws.recv()
     j = json.loads(result)
@@ -330,7 +357,8 @@ def fees():
 
 
 @app.route('/account_history')
-def account_history():
+@use_ws_connection()
+def account_history(ws):
     ws.send('{"id":2,"method":"call","params":[1,"login",["",""]]}')
     login = ws.recv()
 
@@ -374,22 +402,23 @@ def get_asset():
     return jsonify(_get_asset(asset_id))
 
 
-def _get_asset(asset_id):
+@use_ws_connection()
+def _get_asset(ws, asset_id):
     if not isObject(asset_id):
-        ws3.send('{"id":1, "method":"call", "params":[0,"lookup_asset_symbols",[["' + asset_id + '"], 0]]}')
-        result_l = ws3.recv()
+        ws.send('{"id":1, "method":"call", "params":[0,"lookup_asset_symbols",[["' + asset_id + '"], 0]]}')
+        result_l = ws.recv()
         j_l = json.loads(result_l)
         asset_id = j_l["result"][0]["id"]
 
     #print asset_id
-    ws3.send('{"id":1, "method":"call", "params":[0,"get_assets",[["' + asset_id + '"], 0]]}')
-    result = ws3.recv()
+    ws.send('{"id":1, "method":"call", "params":[0,"get_assets",[["' + asset_id + '"], 0]]}')
+    result = ws.recv()
     j = json.loads(result)
 
     dynamic_asset_data_id =  j["result"][0]["dynamic_asset_data_id"]
 
-    ws3.send('{"id": 1, "method": "call", "params": [0, "get_objects", [["'+dynamic_asset_data_id+'"]]]}')
-    result2 = ws3.recv()
+    ws.send('{"id": 1, "method": "call", "params": [0, "get_objects", [["'+dynamic_asset_data_id+'"]]]}')
+    result2 = ws.recv()
     j2 = json.loads(result2)
     #print j2["result"][0]["current_supply"]
 
@@ -401,8 +430,8 @@ def _get_asset(asset_id):
     j["result"][0]["fee_pool"] = j2["result"][0]["fee_pool"]
 
     issuer = j["result"][0]["issuer"]
-    ws3.send('{"id": 1, "method": "call", "params": [0, "get_objects", [["'+issuer+'"]]]}')
-    result3 = ws3.recv()
+    ws.send('{"id": 1, "method": "call", "params": [0, "get_objects", [["'+issuer+'"]]]}')
+    result3 = ws.recv()
     j3 = json.loads(result3)
     j["result"][0]["issuer_name"] = j3["result"][0]["name"]
 
@@ -410,7 +439,8 @@ def _get_asset(asset_id):
 
 
 @app.route('/get_asset_and_volume')
-def get_asset_and_volume():
+@use_ws_connection()
+def get_asset_and_volume(ws):
     asset_id = request.args.get('asset_id')
 
     if not isObject(asset_id):
@@ -463,7 +493,8 @@ def get_asset_and_volume():
 
 
 @app.route('/block_header')
-def block_header():
+@use_ws_connection()
+def block_header(ws):
     block_num = request.args.get('block_num')
 
     ws.send('{"id":1, "method":"call", "params":[0,"get_block_header",[' + block_num + ', 0]]}')
@@ -476,7 +507,8 @@ def block_header():
 
 
 @app.route('/get_block')
-def get_block():
+@use_ws_connection()
+def get_block(ws):
     block_num = request.args.get('block_num')
 
     ws.send('{"id":1, "method":"call", "params":[0,"get_block",[' + block_num + ', 0]]}')
@@ -495,7 +527,8 @@ def get_ticker():
     return jsonify(_get_ticker(base, quote))
 
 
-def _get_ticker(base, quote):
+@use_ws_connection()
+def _get_ticker(ws, base, quote):
     ws.send('{"id":1, "method":"call", "params":[0,"get_ticker",["' + base + '", "'+quote+'"]]}')
     result = ws.recv()
     j = json.loads(result)
@@ -509,7 +542,8 @@ def get_volume():
     return jsonify(_get_volume(base, quote))
 
 
-def _get_volume(base, quote):
+@use_ws_connection()
+def _get_volume(ws, base, quote):
     ws.send('{"id":1, "method":"call", "params":[0,"get_24_volume",["' + base + '", "'+quote+'"]]}')
     result = ws.recv()
     j = json.loads(result)
@@ -544,7 +578,9 @@ def get_object():
     obj = request.args.get('object')
     return jsonify(_get_object(obj))
 
-def _get_object(obj):
+
+@use_ws_connection()
+def _get_object(ws, obj):
     ws.send('{"id":1, "method":"call", "params":[0,"get_objects",[["'+obj+'"]]]}')
     result =  ws.recv()
     j = json.loads(result)
@@ -557,7 +593,8 @@ def get_asset_holders_count():
     return jsonify(_get_asset_holders_count(asset_id))
 
 
-def _get_asset_holders_count(asset_id):
+@use_ws_connection()
+def _get_asset_holders_count(ws, asset_id):
     if not isObject(asset_id):
         ws.send('{"id":1, "method":"call", "params":[0,"lookup_asset_symbols",[["' + asset_id + '"], 0]]}')
         result_l = ws.recv()
@@ -583,7 +620,8 @@ def _get_asset_holders_count(asset_id):
 
 
 @app.route('/get_asset_holders')
-def get_asset_holders():
+@use_ws_connection()
+def get_asset_holders(ws):
     asset_id = request.args.get('asset_id')
     start = request.args.get('start', 0)
     limit = request.args.get('limit', 20)
@@ -613,7 +651,8 @@ def get_asset_holders():
 
 
 @app.route('/get_workers')
-def get_workers():
+@use_ws_connection()
+def get_workers(ws):
     ws.send('{"jsonrpc": "2.0", "method": "get_worker_count", "params": [], "id": 1}')
 
     count =  ws.recv()
@@ -663,7 +702,8 @@ def isObject(string):
 
 
 @app.route('/get_markets')
-def get_markets():
+@use_ws_connection()
+def get_markets(ws):
     asset_id = request.args.get('asset_id')
 
     if not isObject(asset_id):
@@ -687,9 +727,10 @@ def get_markets_data():
     pairs_data = {}
     # to avoid error 'URLError: <urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed'
     gcontext = ssl.SSLContext(ssl.PROTOCOL_TLSv1)
-    contents = urllib2.urlopen(config.IDAX_API + '/tickers', context=gcontext).read()
+    headers={'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Ubuntu Chromium/73.0.3683.86 Chrome/73.0.3683.86 Safari/537.36',}
+    req = urllib2.Request(config.IDAX_API + '/tickers', headers=headers)
+    contents = urllib2.urlopen(req, context=gcontext, ).read()
     res = json.loads(contents)
-
     pair_prefix = '{}_'.format(config.CORE_ASSET_SYMBOL)  # 'VIN_'
     for pair in res['data']:
         if pair['market'].startswith(pair_prefix):
@@ -706,7 +747,8 @@ def get_most_active_markets():
 
 
 @app.route('/get_order_book')
-def get_order_book():
+@use_ws_connection()
+def get_order_book(ws):
     base = request.args.get('base')
     quote = request.args.get('quote')
     limit = request.args.get('limit', False)
@@ -722,7 +764,8 @@ def get_order_book():
 
 
 @app.route('/get_margin_positions')
-def get_open_orders():
+@use_ws_connection()
+def get_open_orders(ws):
     account_id = request.args.get('account_id')
     ws.send('{"id":1, "method":"call", "params":[0,"get_margin_positions",["'+account_id+'"]]}')
     result =  ws.recv()
@@ -732,23 +775,24 @@ def get_open_orders():
 
 
 @app.route('/get_witnesses')
-def get_witnesses():
-    ws2.send('{"jsonrpc": "2.0", "method": "get_witness_count", "params": [], "id": 1}')
-    count =  ws2.recv()
+@use_ws_connection()
+def get_witnesses(ws):
+    ws.send('{"jsonrpc": "2.0", "method": "get_witness_count", "params": [], "id": 1}')
+    count =  ws.recv()
     count_j = json.loads(count)
 
     witnesses_count = count_j["result"]
 
     witnesses = []
     for w in range(0, witnesses_count):
-        ws2.send('{"id":1, "method":"call", "params":[0,"get_objects",[["1.6.'+str(w)+'"]]]}')
-        result =  ws2.recv()
+        ws.send('{"id":1, "method":"call", "params":[0,"get_objects",[["1.6.'+str(w)+'"]]]}')
+        result =  ws.recv()
         j = json.loads(result)
         if j["result"] and j["result"][0] is not None:
             account_id = j["result"][0]["witness_account"]
             #print account_id
-            ws2.send('{"id":1, "method":"call", "params":[0,"get_accounts",[["' + account_id + '"]]]}')
-            result2 = ws2.recv()
+            ws.send('{"id":1, "method":"call", "params":[0,"get_accounts",[["' + account_id + '"]]]}')
+            result2 = ws.recv()
             j2 = json.loads(result2)
 
             account_name = j2["result"][0]["name"]
@@ -767,7 +811,8 @@ def get_witnesses():
 
 
 @app.route('/get_committee_members')
-def get_committee_members():
+@use_ws_connection()
+def get_committee_members(ws):
     ws.send('{"jsonrpc": "2.0", "method": "get_committee_count", "params": [], "id": 1}')
     count =  ws.recv()
     count_j = json.loads(count)
@@ -810,7 +855,8 @@ def market_chart_dates():
 
 
 @app.route('/market_chart_data')
-def market_chart_data():
+@use_ws_connection()
+def market_chart_data(ws):
     ws.send('{"id":2,"method":"call","params":[1,"login",["",""]]}')
     login =  ws.recv()
 
@@ -968,7 +1014,8 @@ def top_holders():
 
 
 @app.route('/witnesses_votes')
-def witnesses_votes():
+@use_ws_connection()
+def witnesses_votes(ws):
     proxies = top_proxies()
     proxies = proxies.response
     proxies = ''.join(proxies)
@@ -1020,7 +1067,8 @@ def witnesses_votes():
 
 
 @app.route('/workers_votes')
-def workers_votes():
+@use_ws_connection()
+def workers_votes(ws):
     proxies = top_proxies()
     proxies = proxies.response
     proxies = ''.join(proxies)
@@ -1075,7 +1123,8 @@ def workers_votes():
 
 
 @app.route('/committee_votes')
-def committee_votes():
+@use_ws_connection()
+def committee_votes(ws):
     proxies = top_proxies()
     proxies = proxies.response
     proxies = ''.join(proxies)
@@ -1240,7 +1289,8 @@ def last_network_transactions():
 
 
 @app.route('/lookup_accounts')
-def lookup_accounts():
+@use_ws_connection()
+def lookup_accounts(ws):
     start = request.args.get('start')
     ws.send('{"id":1, "method":"call", "params":[0,"lookup_accounts",["'+start+'", 1000]]}')
     result =  ws.recv()
@@ -1266,7 +1316,8 @@ def lookup_assets():
 
 
 @app.route('/getlastblocknumbher')
-def getlastblocknumber():
+@use_ws_connection()
+def getlastblocknumber(ws):
     ws.send('{"id":1, "method":"call", "params":[0,"get_dynamic_global_properties",[]]}')
     result =  ws.recv()
     j = json.loads(result)
@@ -1275,14 +1326,12 @@ def getlastblocknumber():
 
 
 @app.route('/account_history_pager')
-def account_history_pager():
+@use_ws_connection(config.FULL_WEBSOCKET_URL)
+def account_history_pager(full_ws):
     page = request.args.get('page')
     account_id = request.args.get('account_id')
 
     # connecting into a full node.
-    #full_websocket_url = "ws://node.testnet.bitshares.eu:18092/ws"
-    full_ws = create_connection(config.FULL_WEBSOCKET_URL)
-
     full_ws.send('{"id":2,"method":"call","params":[1,"login",["",""]]}')
     login =  full_ws.recv()
 
@@ -1335,7 +1384,8 @@ def account_history_pager():
 
 
 @app.route('/account_history_pager_elastic')
-def account_history_pager_elastic():
+@use_ws_connection()
+def account_history_pager_elastic(ws):
     page = request.args.get('page')
     account_id = request.args.get('account_id')
 
@@ -1367,7 +1417,8 @@ def account_history_pager_elastic():
 
 
 @app.route('/get_limit_orders')
-def get_limit_orders():
+@use_ws_connection()
+def get_limit_orders(ws):
     base = request.args.get('base')
     quote = request.args.get('quote')
     ws.send('{"id":1, "method":"call", "params":[0,"get_limit_orders",["' + base + '", "' + quote + '", 100]]}')
@@ -1378,7 +1429,8 @@ def get_limit_orders():
 
 
 @app.route('/get_call_orders')
-def get_call_orders():
+@use_ws_connection()
+def get_call_orders(ws):
     base = request.args.get('base')
     quote = request.args.get('quote')
     ws.send('{"id":1, "method":"call", "params":[0,"get_call_orders",["' + base + '", "' + quote + '", 100]]}')
@@ -1389,7 +1441,8 @@ def get_call_orders():
 
 
 @app.route('/get_settle_orders')
-def get_settle_orders():
+@use_ws_connection()
+def get_settle_orders(ws):
     base = request.args.get('base')
     quote = request.args.get('quote')
     ws.send('{"id":1, "method":"call", "params":[0,"get_settle_orders",["' + base + '", "' + quote + '", 100]]}')
@@ -1400,7 +1453,8 @@ def get_settle_orders():
 
 
 @app.route('/get_fill_order_history')
-def get_fill_order_history():
+@use_ws_connection()
+def get_fill_order_history(ws):
     ws.send('{"id":2,"method":"call","params":[1,"login",["",""]]}')
     login =  ws.recv()
 
@@ -1479,7 +1533,8 @@ def daily_volume_dex_data():
 
 
 @app.route('/get_all_asset_holders')
-def get_all_asset_holders():
+@use_ws_connection()
+def get_all_asset_holders(ws):
     asset_id = request.args.get('asset_id')
 
     if not isObject(asset_id):
@@ -1523,7 +1578,8 @@ def get_all_asset_holders():
 
 
 @app.route('/referrer_count')
-def referrer_count():
+@use_ws_connection()
+def referrer_count(ws):
     account_id = request.args.get('account_id')
 
     if not isObject(account_id):
@@ -1544,7 +1600,8 @@ def referrer_count():
 
 
 @app.route('/get_all_referrers')
-def get_all_referrers():
+@use_ws_connection()
+def get_all_referrers(ws):
     account_id = request.args.get('account_id')
     page = request.args.get('page', 0)
 
@@ -1565,36 +1622,3 @@ def get_all_referrers():
     results = cur.fetchall()
 
     return jsonify(results)
-
-@app.route('/get_grouped_limit_orders')
-def get_grouped_limit_orders():
-
-    # connecting to a node with grouper orders plugin active, this is temporal.-
-    ws = create_connection("ws://209.188.21.157:8090/ws")
-
-    base = request.args.get('base')
-    quote = request.args.get('quote')
-    group = request.args.get('group', 10)
-    limit = request.args.get('limit', False)
-
-    if not limit:
-        limit = 10
-    elif int(limit) > 50:
-        limit = 50
-
-    if not isObject(base):
-        ws.send('{"id":1, "method":"call", "params":[0,"lookup_asset_symbols",[["' + base + '"], 0]]}')
-        result_l = ws.recv()
-        j_l = json.loads(result_l)
-        base = j_l["result"][0]["id"]
-    if not isObject(quote):
-        ws.send('{"id":1, "method":"call", "params":[0,"lookup_asset_symbols",[["' + quote + '"], 0]]}')
-        result_l = ws.recv()
-        j_l = json.loads(result_l)
-        quote = j_l["result"][0]["id"]
-
-    ws.send('{"id":1, "method":"call", "params":["orders","get_grouped_limit_orders",["'+base+'", "'+quote+'", '+str(group)+', null, '+str(limit)+']]}')
-    result = ws.recv()
-    j = json.loads(result)
-    return jsonify(j["result"])
-

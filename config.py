@@ -11,13 +11,13 @@ POSTGRES = {'host': os.environ.get('POSTGRES_HOST', 'localhost'),
 }
 
 # a connection to a bitshares full node
-FULL_WEBSOCKET_URL = os.environ.get('FULL_WEBSOCKET_URL', "ws://88.99.145.10:9999/ws")
+FULL_WEBSOCKET_URL = os.environ.get('FULL_WEBSOCKET_URL', "ws://127.0.0.1:8090/ws")
 
 # a connection to an ElasticSearch wrapper
 ES_WRAPPER = os.environ.get('ES_WRAPPER', "http://127.0.0.1:5010")
 
 COINMARKETCAP_API = os.environ.get('COINMARKETCAP_API', "https://api.coinmarketcap.com/v2")
-IDAX_API = os.environ.get('IDAX_API', "https://openapi.idax.mn/api/v1")
+IDAX_API = os.environ.get('IDAX_API', "https://openapi.idax.pro/api/v1")
 
 CORE_ASSET_SYMBOL = 'VIN'
 CORE_ASSET_ID = '1.3.0'
